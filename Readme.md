@@ -2,6 +2,8 @@
 
 This is based on https://developer.ridgerun.com/wiki/index.php?title=Jetson_Nano/Development/Building_the_Kernel_from_Source
 
+Update: use https://docs.nvidia.com/jetson/archives/r36.4.3/DeveloperGuide/SD/Kernel/KernelCustomization.html instead
+
 Jetson Nano's original image does not come with KVM enabled, thus we have to recompile the kernel and activate it. In this article, we're gonna do everything inside the Nano so we don't have to take out the SD card or flash a new image. You might be surprised that recompiling the kernel in the Nano itself takes less than 30 minutes.
 
 So, put your Nano to work with the latest Ubuntu image provided by Jetson Nano, and then boot it and install the dependencies needed to build the kernel:
@@ -28,18 +30,76 @@ So let's do all of this in one shot. Remember that you'd have to change the kern
 #Installs dependencies for getting/building the kernel
 sudo apt update && sudo apt-get install -y build-essential bc git curl wget xxd kmod libssl-dev
 
+WORKING_DIR=$(pwd)
+
+#Install toolchain
+mkdir $WORKING_DIR/l4t-gcc
+cd $WORKING_DIR/l4t-gcc
+wget https://developer.nvidia.com/downloads/embedded/l4t/r36_release_v3.0/toolchain/aarch64--glibc--stable-2022.08-1.tar.bz2
+tar xf aarch64--glibc--stable-2022.08-1.tar.bz2
+rm aarch64--glibc--stable-2022.08-1.tar.bz2
+TOOLCHAIN_PATH=$WORKING_DIR/l4t-gcc/aarch64--glibc--stable-2022.08-1
+
 #Gets the kernel
-cd ~/
-wget https://developer.nvidia.com/embedded/l4t/r32_release_v5.1/r32_release_v5.1/sources/t210/public_sources.tbz2
+mkdir $WORKING_DIR/kernel
+cd $WORKING_DIR/kernel
+wget https://developer.nvidia.com/downloads/embedded/l4t/r36_release_v4.3/sources/public_sources.tbz2
 tar -jxvf public_sources.tbz2
-JETSON_NANO_KERNEL_SOURCE=~/Linux_for_Tegra/source/public/
-tar -jxvf kernel_src.tbz2
+rm public_sources.tbz2
+JETSON_NANO_KERNEL_SOURCE=$WORKING_DIR/kernel/Linux_for_Tegra/source/
+cd $JETSON_NANO_KERNEL_SOURCE
+tar xf kernel_src.tbz2
+tar xf kernel_oot_modules_src.tbz2
+tar xf nvidia_kernel_display_driver_source.tbz2
 
 # Applies the new configs to tegra_defconfig so KVM option is enabled
-cd ${JETSON_NANO_KERNEL_SOURCE}/kernel/kernel-4.9
-echo "CONFIG_KVM=y
-CONFIG_VHOST_NET=m" >> arch/arm64/configs/tegra_defconfig
+cd ${JETSON_NANO_KERNEL_SOURCE}/kernel/kernel-jammy-src
+echo "CONFIG_VHOST_NET=y
+CONFIG_INPUT_UINPUT=y
+CONFIG_IP_NF_RAW=y" >> arch/arm64/configs/defconfig
+
+cd $WORKING_DIR
+
+cd $JETSON_NANO_KERNEL_SOURCE
+
+# doesn't actually seem to work for compiling on the orin nano itself
+# export CROSS_COMPILE=$TOOLCHAIN_PATH/bin/aarch64-buildroot-linux-gnu-
+make -C kernel
+
+cd $JETSON_NANO_KERNEL_SOURCE
+
+export KERNEL_HEADERS=$JETSON_NANO_KERNEL_SOURCE/kernel/kernel-jammy-src
+make modules
+
+cd $JETSON_NANO_KERNEL_SOURCE
+
+export KERNEL_HEADERS=$JETSON_NANO_KERNEL_SOURCE/kernel/kernel-jammy-src
+make dtbs
+
+# Install all
+
+cd $JETSON_NANO_KERNEL_SOURCE
+
+sudo cp -r /lib/modules /lib/modules_backup
+sudo cp /boot/Image /boot/Image.bak
+sudo cp -r /boot/dtb /boot/dtb_backup
+
+export INSTALL_MOD_PATH=/
+sudo -E make install -C kernel
+cp kernel/kernel-jammy-src/arch/arm64/boot/Image \
+  /boot/Image
+
+sudo -E make modules_install
+
+sudo nv-update-initrd
+
+cp kernel-devicetree/generic-dts/dtbs/* /boot/dtb
+
+sudo reboot
 ```
+
+Ignore the rest for now...
+
 
 Compiling the kernel now would already activate KVM, but we would still miss an important feature that makes virtualization much faster: the irq chip. Without it, virtualization is still possible but an emulated irq chip is much slower. On `firecracker` (a virtualization tool written by AWS), it will not work as it requires this.
 
@@ -68,7 +128,7 @@ as you see, we added more `reg` and `interrupts`. Now, when we compile the kerne
 Now we should compile everything:
 
 ```bash
-JETSON_NANO_KERNEL_SOURCE=~/Linux_for_Tegra/source/public
+JETSON_NANO_KERNEL_SOURCE=~/Linux_for_Tegra/source
 TEGRA_KERNEL_OUT=$JETSON_NANO_KERNEL_SOURCE/build
 KERNEL_MODULES_OUT=$JETSON_NANO_KERNEL_SOURCE/modules
 cd $JETSON_NANO_KERNEL_SOURCE
