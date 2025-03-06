@@ -81,19 +81,20 @@ make dtbs
 cd $JETSON_NANO_KERNEL_SOURCE
 
 sudo cp -r /lib/modules /lib/modules_backup
-sudo cp /boot/Image /boot/Image.bak
-sudo cp -r /boot/dtb /boot/dtb_backup
+# sudo cp /boot/Image /boot/Image.bak
+# sudo cp -r /boot/dtb /boot/dtb_backup
+sudo cp -r /boot /boot_backup
 
 export INSTALL_MOD_PATH=/
 sudo -E make install -C kernel
-cp kernel/kernel-jammy-src/arch/arm64/boot/Image \
+sudo cp kernel/kernel-jammy-src/arch/arm64/boot/Image \
   /boot/Image
 
 sudo -E make modules_install
 
 sudo nv-update-initrd
 
-cp kernel-devicetree/generic-dts/dtbs/* /boot/dtb
+sudo cp kernel-devicetree/generic-dts/dtbs/* /boot/dtb
 
 sudo reboot
 ```
